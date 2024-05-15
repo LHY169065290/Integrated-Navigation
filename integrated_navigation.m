@@ -5,8 +5,8 @@ format long
 
 load mimu_gnss1.mat;
 truth = load('F:\i2nav_shuju-main\truth16465.txt');
+
 %% sensor_data
-T = 1;
 ts = 1/200;
 re = 6378137;
 Wie = 7.2921151467e-5;
@@ -47,21 +47,12 @@ truth_pitch = truth(:,10);
 truth_yaw = truth(:,11);
 [hang2,~] = size(truth);
 
-mimu_Lat(1,1) = mimu_gnss(1,8).*(pi/180);
-mimu_Lon(1,1) = mimu_gnss(1,9).*(pi/180);
-mimu_H(1,1) = mimu_gnss(1,10);
-mimu_vx(1,1) = mimu_gnss(1,11);
-mimu_vy(1,1) = mimu_gnss(1,12);
-mimu_vz(1,1) = mimu_gnss(1,13);
-V_m = [];
-
 BB0 = 1-(3/4).*e12^2+(45/64).*e12^4-(175/256).*e12^6+(11025/16384).*e12^8;
 BB2 = BB0-1;
 BB4 = (15/32).*e12^4-(175/384).*e12^6+(3675/8192).*e12^8;
 BB6 = (-35/96).*e12^6+(735/2048).*e12^8;
 BB8 = (315/1024).*e12^8;
 
-i_kf = 1;
 P_kf = diag([(0.5.*(pi/180))^2 (0.5.*(pi/180))^2 (1.*(pi/180))^2 0.0002^2 0.0002^2 0.0002^2 (0.01/3600/60/57.3)^2 (0.01/3600/60/57.3)^2 (0.01)^2  (25.*(pi/180)/3600)^2 (25.*(pi/180)/3600)^2 (25.*(pi/180)/3600)^2 (0.20408e-3*9.7803267714)^2 (0.20408e-3*9.7803267714)^2 (0.20408e-3*9.7803267714)^2]);
 Q_diag = [(15.*0.15*(2.909*1e-4))^2 (15.*0.15*(2.909*1e-4))^2 (15.*0.15*(2.909*1e-4))^2 (15.*0.0002)^2 (15.*0.0002)^2 (15.*0.0002)^2];
 Q = diag(Q_diag);
@@ -83,26 +74,155 @@ P11 = P_kf(1,1);
 P22 = P_kf(2,2);
 P33 = P_kf(3,3);
 
-%% Attitude_Vimu_Pimu_ESKF_upgrade
-fCpitch(1,1) = truth_pitch(1,1).*(pi/180);
-fCroll(1,1) = truth_roll(1,1).*(pi/180);
-fCyaw(1,1) = truth_yaw(1,1).*(pi/180);
-% fCpitch(1,1) = 0;
-% fCroll(1,1) = 0;
-% fCyaw(1,1) = 0;
-Cnb = [cos(fCpitch(1,1)).*cos(fCyaw(1,1)),sin(fCroll(1,1)).*sin(fCpitch(1,1)).*cos(fCyaw(1,1))-cos(fCroll(1,1)).*sin(fCyaw(1,1)),cos(fCroll(1,1)).*sin(fCpitch(1,1)).*cos(fCyaw(1,1))+sin(fCroll(1,1)).*sin(fCyaw(1,1));
-       cos(fCpitch(1,1)).*sin(fCyaw(1,1)),sin(fCroll(1,1)).*sin(fCpitch(1,1)).*sin(fCyaw(1,1))+cos(fCroll(1,1)).*cos(fCyaw(1,1)),cos(fCroll(1,1)).*sin(fCpitch(1,1)).*sin(fCyaw(1,1))-sin(fCroll(1,1)).*cos(fCyaw(1,1));
-       -sin(fCpitch(1,1)),sin(fCroll(1,1)).*cos(fCpitch(1,1)),cos(fCroll(1,1)).*cos(fCpitch(1,1))];
-for i = 2:hang1
-    % extrapolation
-    if m_wx(i) == 0 && m_wy(i) == 0 && m_wz(i) == 0
-        m_ax(i) = (3.*m_ax(i-1) - m_ax(i-2))/2;
-        m_ay(i) = (3.*m_ay(i-1) - m_ay(i-2))/2;
-        m_az(i) = (3.*m_az(i-1) - m_az(i-2))/2;
-        m_wx(i) = (3.*m_wx(i-1) - m_wx(i-2))/2;
-        m_wy(i) = (3.*m_wy(i-1) - m_wy(i-2))/2;
-        m_wz(i) = (3.*m_wz(i-1) - m_wz(i-2))/2;
+%% Alignment
+g = [0;0;9.79361];
+T = 1;
+alpha = 0;beta1 = 0;
+Cnb = eye(3);Cbb = eye(3);Cnn = eye(3);
+Cbb_gnss = eye(3);
+v1 = 0;v2 = 0;
+seita1 = 0;seita2 = 0;
+vn0 = [GNSS_vx(1);GNSS_vy(1);GNSS_vz(1)];
+vn = [GNSS_vx(1);GNSS_vy(1);GNSS_vz(1)];
+A = 0;
+fCpitch(1,1) = 0;
+fCroll(1,1) = 0;
+fCyaw(1,1) = 0;
+Cnnm = eye(3);
+[fh,~] = find(Ti_mimu == 10);
+i_kf = fh;
+
+mimu_Lat(1,1) = mimu_gnss(fh,8).*(pi/180);
+mimu_Lon(1,1) = mimu_gnss(fh,9).*(pi/180);
+mimu_H(1,1) = mimu_gnss(fh,10);
+mimu_vx(1,1) = mimu_gnss(fh,11);
+mimu_vy(1,1) = mimu_gnss(fh,12);
+mimu_vz(1,1) = mimu_gnss(fh,13);
+V_m = [];
+
+for i = 2:fh
+    % upgrade Cbb
+    % two sample + previous cycle
+    Angle1 = [m_wx(i-1);m_wy(i-1);m_wz(i-1)];
+    Angle2 = [m_wx(i);m_wy(i);m_wz(i)];
+    A_b = Angle2 + cross(((1/12).*Angle1),Angle2);
+    
+    A_b_X = [0 -A_b(3) A_b(2);
+             A_b(3) 0 -A_b(1);
+             -A_b(2) A_b(1) 0];
+    IA_bI = norm(A_b);
+    
+    Cbbt = eye(3) + (sin(IA_bI)/IA_bI)*A_b_X + ((1-cos(IA_bI))/(IA_bI)^2)*(A_b_X)^2;
+    Cbb = Cbb*Cbbt;
+    
+    v1 = v1 + [m_ax(i);m_ay(i);m_az(i)]/2;
+    v2 = v2 + [m_ax(i);m_ay(i);m_az(i)]/2;
+    seita1 = seita1 + [m_wx(i);m_wy(i);m_wz(i)]/2;
+    seita2 = seita2 + [m_wx(i);m_wy(i);m_wz(i)]/2;
+    
+    if GNSS_Lat(i) ~= 0
+        Rx = (re/sqrt(1-e11^2.*(sin(GNSS_Lat(i)))^2));
+        Ry = ((Rx.*(1-e11^2))/(1-e11^2.*(GNSS_Lat(i))^2));
+        Wnie = [Wie.*cos(GNSS_Lat(i));
+                0;
+                -Wie.*sin(GNSS_Lat(i))];
+        Win = [(Wie.*cos(GNSS_Lat(i))+GNSS_vy(i))/(Rx+GNSS_H(i));
+               -GNSS_vx(i)/(Ry+GNSS_H(i));
+               (-Wie.*sin(GNSS_Lat(i))-GNSS_vy(i).*tan(GNSS_Lat(i)))/(Rx+GNSS_H(i))];
+        Win_X = [0 -Win(3) Win(2);
+                 Win(3) 0 -Win(1);
+                 -Win(2) Win(1) 0];
+        A_n = Win.*T;
+        A_n_X = [0 -A_n(3) A_n(2);
+                 A_n(3) 0 -A_n(1);
+                 -A_n(2) A_n(1) 0];
+        IA_nI = norm(A_n);
+        Cnnt = eye(3) - (sin(IA_nI)/IA_nI)*A_n_X + ((1-cos(IA_nI))/(IA_nI)^2)*(A_n_X)^2;
+        % upgrade alpha
+        alpha = alpha + Cbb_gnss*(v1 + v2 + 0.5.*cross((seita1 + seita2),(v1 + v2)) + (2/3).*(cross(seita1,v2) + cross(v1,seita2)));
+        v1 = 0;v2 = 0;
+        seita1 = 0;seita2 = 0;
+        Cbb_gnss = Cbb;
+        Am1 = cross((((T/2).*eye(3) + (T^2/6).*Win_X)*Wnie),vn);
+        vn = [GNSS_vx(i);GNSS_vy(i);GNSS_vz(i)];
+        Am2 = cross((((T/2).*eye(3) + (T^2/3).*Win_X)*Wnie),vn);
+        beta1 = beta1 + Cnn'*(Am1 + Am2 - (T.*eye(3) + (T^2/2).*Win_X)*g);
+        % upgrade Cnn
+        Cnn = Cnnt*Cnn;
+        % upgrade beta
+        beta = Cnn'*vn - Cnnm'*vn0 + beta1;
+        
+        A = A + beta*alpha';
+        B = A'*A;
+        [Eigen_vector,D] = eig(B);
+        D = sqrt(D);
+        V = Eigen_vector;
+        U = A*V*inv(D);
+        Cnb0 = U*V';
+        Cnb = Cnn*Cnb0*Cbb;
+        
+        fCpitch(i,1) = asin(-Cnb(3,1));
+        fCroll(i,1) = atan(Cnb(3,2)/Cnb(3,3));
+        if Cnb(3,3) < 0
+            if fCroll(i,1) > 0
+                fCroll(i,1) = fCroll(i,1) - pi;
+            else
+                fCroll(i,1) = fCroll(i,1) + pi;
+            end
+        end
+        fCyaw(i,1) = atan(Cnb(2,1)/Cnb(1,1));
+        if Cnb(2,1) > 0
+            if abs(Cnb(1,1)) < 0.0001
+                fCyaw(i,1) = pi/2;
+            elseif Cnb(1,1) < 0
+                fCyaw(i,1) = fCyaw(i,1) + pi;
+            end
+        else
+            if abs(Cnb(1,1)) < 0.0001
+                fCyaw(i,1) = -pi/2;
+            elseif Cnb(1,1) < 0
+                fCyaw(i,1) = fCyaw(i,1) - pi;
+            end
+        end
+        % yaw range: 0°-360°
+        if fCyaw(i,1) < 0
+            fCyaw(i,1) = fCyaw(i,1) + 2.*pi;
+        end
+    else
+        Cnb = Cnb*Cbbt;
+        
+        fCpitch(i,1) = asin(-Cnb(3,1));
+        fCroll(i,1) = atan(Cnb(3,2)/Cnb(3,3));
+        if Cnb(3,3) < 0
+            if fCroll(i,1) > 0
+                fCroll(i,1) = fCroll(i,1) - pi;
+            else
+                fCroll(i,1) = fCroll(i,1) + pi;
+            end
+        end
+        fCyaw(i,1) = atan(Cnb(2,1)/Cnb(1,1));
+        if Cnb(2,1) > 0
+            if abs(Cnb(1,1)) < 0.0001
+                fCyaw(i,1) = pi/2;
+            elseif Cnb(1,1) < 0
+                fCyaw(i,1) = fCyaw(i,1) + pi;
+            end
+        else
+            if abs(Cnb(1,1)) < 0.0001
+                fCyaw(i,1) = -pi/2;
+            elseif Cnb(1,1) < 0
+                fCyaw(i,1) = fCyaw(i,1) - pi;
+            end
+        end
+        % yaw range: 0°-360°
+        if fCyaw(i,1) < 0
+            fCyaw(i,1) = fCyaw(i,1) + 2.*pi;
+        end
     end
+end
+
+%% Attitude_Vimu_Pimu_ESKF_upgrade
+for i = fh+1:hang1
     % Attitide
     if GNSS_vx(i) ~= 0
         % upgrade Cnn
@@ -129,7 +249,7 @@ for i = 2:hang1
                  -A_b(2) A_b(1) 0];
         IA_bI = norm(A_b);
         Cbb = eye(3) + (sin(IA_bI)/IA_bI)*A_b_X + ((1-cos(IA_bI))/(IA_bI)^2)*(A_b_X)^2;
-        
+           
         Cnb = Cnn*Cnb*Cbb;
         fCpitch(i,1) = asin(-Cnb(3,1));
         fCroll(i,1) = atan(Cnb(3,2)/Cnb(3,3));
@@ -205,18 +325,18 @@ for i = 2:hang1
            cos(fCpitch(i-1)).*sin(fCyaw(i-1)),sin(fCroll(i-1)).*sin(fCpitch(i-1)).*sin(fCyaw(i-1))+cos(fCroll(i-1)).*cos(fCyaw(i-1)),cos(fCroll(i-1)).*sin(fCpitch(i-1)).*sin(fCyaw(i-1))-sin(fCroll(i-1)).*cos(fCyaw(i-1));
            -sin(fCpitch(i-1)),sin(fCroll(i-1)).*cos(fCpitch(i-1)),cos(fCroll(i-1)).*cos(fCpitch(i-1))];
     V_m(1:3,1) = [mimu_vx(1);mimu_vy(1);mimu_vz(1)];
-    if i == 2
-        B_i2 = mimu_Lat(i-1);
-        vx_i2 = mimu_vx(i-1);
-        vy_i2 = mimu_vy(i-1);
-        vz_i2 = mimu_vz(i-1);
-        H_i2 = mimu_H(i-1);
+    if i == fh+1
+        B_i2 = mimu_Lat(i-fh);
+        vx_i2 = mimu_vx(i-fh);
+        vy_i2 = mimu_vy(i-fh);
+        vz_i2 = mimu_vz(i-fh);
+        H_i2 = mimu_H(i-fh);
     else
-        B_i2 = mimu_Lat(i-1) + (mimu_Lat(i-1) - mimu_Lat(i-2))/2;
-        vx_i2 =  V_m(1,i-1) + ( V_m(1,i-1) -  V_m(1,i-2))/2;
-        vy_i2 =  V_m(2,i-1) + ( V_m(2,i-1) -  V_m(2,i-2))/2;
-        vz_i2 =  V_m(3,i-1) + ( V_m(3,i-1) -  V_m(3,i-2))/2;
-        H_i2 = mimu_H(i-1) + (mimu_H(i-1) - mimu_H(i-2))/2;
+        B_i2 = mimu_Lat(i-fh) + (mimu_Lat(i-fh) - mimu_Lat(i-fh-1))/2;
+        vx_i2 =  V_m(1,i-fh) + ( V_m(1,i-fh) -  V_m(1,i-fh-1))/2;
+        vy_i2 =  V_m(2,i-fh) + ( V_m(2,i-fh) -  V_m(2,i-fh-1))/2;
+        vz_i2 =  V_m(3,i-fh) + ( V_m(3,i-fh) -  V_m(3,i-fh-1))/2;
+        H_i2 = mimu_H(i-fh) + (mimu_H(i-fh) - mimu_H(i-fh-1))/2;
     end
     Rx = (re/sqrt(1-e11^2.*(sin(B_i2))^2));           % radius of curvature of prime unitary circle
     Ry = ((Rx.*(1-e11^2))/(1-e11^2.*(sin(B_i2))^2));  % radius of curvature of meridian circle
@@ -241,20 +361,20 @@ for i = 2:hang1
     
     dV_cor = (-cross(Wn,v_i2) + g_i2).*ts;
     dV_sf = (eye(3) - (ts/2).*Wn_in_X)*Cnb*(dV_m + dV_rot + dV_scul);
-    V_m(1:3,i) = V_m(1:3,i-1) + dV_sf + dV_cor;
+    V_m(1:3,i-fh+1) = V_m(1:3,i-fh) + dV_sf + dV_cor;
     % Pimu
-    mimu_Lat(i) = ((V_m(1,i-1) + V_m(1,i))/2).*ts/(Ry+H_i2)+mimu_Lat(i-1);                  % latitude
-    mimu_Lon(i) = ((V_m(2,i-1) + V_m(2,i))/2).*ts/((Rx+H_i2).*cos(B_i2))+mimu_Lon(i-1);     % longitude
-    mimu_H(i,1) = -((V_m(3,i-1) + V_m(3,i))/2).*ts + mimu_H(i-1);                           % height
+    mimu_Lat(i-fh+1) = ((V_m(1,i-fh) + V_m(1,i-fh+1))/2).*ts/(Ry+H_i2)+mimu_Lat(i-fh);                  % latitude
+    mimu_Lon(i-fh+1) = ((V_m(2,i-fh) + V_m(2,i-fh+1))/2).*ts/((Rx+H_i2).*cos(B_i2))+mimu_Lon(i-fh);     % longitude
+    mimu_H(i-fh+1,1) = -((V_m(3,i-fh) + V_m(3,i-fh+1))/2).*ts + mimu_H(i-fh);                           % height
     Cnb = [cos(fCpitch(i)).*cos(fCyaw(i)),sin(fCroll(i)).*sin(fCpitch(i)).*cos(fCyaw(i))-cos(fCroll(i)).*sin(fCyaw(i)),cos(fCroll(i)).*sin(fCpitch(i)).*cos(fCyaw(i))+sin(fCroll(i)).*sin(fCyaw(i));
            cos(fCpitch(i)).*sin(fCyaw(i)),sin(fCroll(i)).*sin(fCpitch(i)).*sin(fCyaw(i))+cos(fCroll(i)).*cos(fCyaw(i)),cos(fCroll(i)).*sin(fCpitch(i)).*sin(fCyaw(i))-sin(fCroll(i)).*cos(fCyaw(i));
            -sin(fCpitch(i)),sin(fCroll(i)).*cos(fCpitch(i)),cos(fCroll(i)).*cos(fCpitch(i))];
     % ESKF
     if GNSS_H(i) ~= 0
-        Rx = (re/sqrt(1-e11^2.*(sin(mimu_Lat(i)))^2));           % radius of curvature of prime unitary circle
-        Ry = ((Rx.*(1-e11^2))/(1-e11^2.*(sin(mimu_Lat(i)))^2));  % radius of curvature of meridian circle
-        Mpv = [1/(Ry+mimu_H(i)) 0 0;
-               0 1/((Rx+mimu_H(i)).*cos(mimu_Lat(i))) 0;
+        Rx = (re/sqrt(1-e11^2.*(sin(mimu_Lat(i-fh+1)))^2));           % radius of curvature of prime unitary circle
+        Ry = ((Rx.*(1-e11^2))/(1-e11^2.*(sin(mimu_Lat(i-fh+1)))^2));  % radius of curvature of meridian circle
+        Mpv = [1/(Ry+mimu_H(i-fh+1)) 0 0;
+               0 1/((Rx+mimu_H(i-fh+1)).*cos(mimu_Lat(i-fh+1))) 0;
                0 0 -1];
         lb_P = Mpv*Cnb*lb; % lever-arm correction
         GNSS_Lat(i) = GNSS_Lat(i) - lb_P(1);
@@ -266,12 +386,12 @@ for i = 2:hang1
         GNSS_vz(i) = GNSS_vz(i) - lb_V(3);
     end
     if GNSS_H(i) ~= 0
-        eps1 = V_m(1,i) - GNSS_vx(i);
-        eps2 = V_m(2,i) - GNSS_vy(i);
-        eps3 = V_m(3,i) - GNSS_vz(i);
-        eps4 = mimu_Lat(i) - GNSS_Lat(i);
-        eps5 = mimu_Lon(i) - GNSS_Lon(i);
-        eps6 = mimu_H(i) - GNSS_H(i);
+        eps1 = V_m(1,i-fh+1) - GNSS_vx(i);
+        eps2 = V_m(2,i-fh+1) - GNSS_vy(i);
+        eps3 = V_m(3,i-fh+1) - GNSS_vz(i);
+        eps4 = mimu_Lat(i-fh+1) - GNSS_Lat(i);
+        eps5 = mimu_Lon(i-fh+1) - GNSS_Lon(i);
+        eps6 = mimu_H(i-fh+1) - GNSS_H(i);
         
         Cnb = [cos(fCpitch(i_kf)).*cos(fCyaw(i_kf)),sin(fCroll(i_kf)).*sin(fCpitch(i_kf)).*cos(fCyaw(i_kf))-cos(fCroll(i_kf)).*sin(fCyaw(i_kf)),cos(fCroll(i_kf)).*sin(fCpitch(i_kf)).*cos(fCyaw(i_kf))+sin(fCroll(i_kf)).*sin(fCyaw(i_kf));
                cos(fCpitch(i_kf)).*sin(fCyaw(i_kf)),sin(fCroll(i_kf)).*sin(fCpitch(i_kf)).*sin(fCyaw(i_kf))+cos(fCroll(i_kf)).*cos(fCyaw(i_kf)),cos(fCroll(i_kf)).*sin(fCpitch(i_kf)).*sin(fCyaw(i_kf))-sin(fCroll(i_kf)).*cos(fCyaw(i_kf));
@@ -312,13 +432,13 @@ for i = 2:hang1
         Wie_ie_Win_X = [0 -Wie_ie_Win(3) Wie_ie_Win(2);
                         Wie_ie_Win(3) 0 -Wie_ie_Win(1);
                         -Wie_ie_Win(2) Wie_ie_Win(1) 0];
-        Mvv = [0 -V_m(3,i_kf) V_m(2,i_kf);V_m(3,i_kf) 0 -V_m(1,i_kf);-V_m(2,i_kf) V_m(1,i_kf) 0]*Mav - Wie_ie_Win_X;
-        Mvp = [0 -V_m(3,i_kf) V_m(2,i_kf);V_m(3,i_kf) 0 -V_m(1,i_kf);-V_m(2,i_kf) V_m(1,i_kf) 0]*(2*M1 + M2);
-        Mpv = [1/(Ry+mimu_H(i_kf)) 0 0;
-               0 1/((Rx+mimu_H(i_kf)).*cos(mimu_Lat(i_kf))) 0;
+        Mvv = [0 -V_m(3,i_kf-fh+1) V_m(2,i_kf-fh+1);V_m(3,i_kf-fh+1) 0 -V_m(1,i_kf-fh+1);-V_m(2,i_kf-fh+1) V_m(1,i_kf-fh+1) 0]*Mav - Wie_ie_Win_X;
+        Mvp = [0 -V_m(3,i_kf-fh+1) V_m(2,i_kf-fh+1);V_m(3,i_kf-fh+1) 0 -V_m(1,i_kf-fh+1);-V_m(2,i_kf-fh+1) V_m(1,i_kf-fh+1) 0]*(2*M1 + M2);
+        Mpv = [1/(Ry+mimu_H(i_kf-fh+1)) 0 0;
+               0 1/((Rx+mimu_H(i_kf-fh+1)).*cos(mimu_Lat(i_kf-fh+1))) 0;
                0 0 -1];
-        Mpp = [0 0 -V_m(1,i_kf)/(Ry+mimu_H(i_kf))^2;
-               V_m(2,i_kf).*sin(mimu_Lat(i_kf))/((Rx+mimu_H(i_kf)).*(cos(mimu_Lat(i_kf)))^2) 0 -V_m(2,i_kf)/((Rx+mimu_H(i_kf))^2.*cos(mimu_Lat(i_kf)));
+        Mpp = [0 0 -V_m(1,i_kf-fh+1)/(Ry+mimu_H(i_kf-fh+1))^2;
+               V_m(2,i_kf-fh+1).*sin(mimu_Lat(i_kf-fh+1))/((Rx+mimu_H(i_kf-fh+1)).*(cos(mimu_Lat(i_kf-fh+1)))^2) 0 -V_m(2,i_kf-fh+1)/((Rx+mimu_H(i_kf-fh+1))^2.*cos(mimu_Lat(i_kf-fh+1)));
                0 0 0];
         F = [Maa Mav Map -Cnb zeros(3);
              Mva Mvv Mvp zeros(3) Cnb;
@@ -354,12 +474,12 @@ for i = 2:hang1
                cos(fCpitch(i)).*sin(fCyaw(i)),sin(fCroll(i)).*sin(fCpitch(i)).*sin(fCyaw(i))+cos(fCroll(i)).*cos(fCyaw(i)),cos(fCroll(i)).*sin(fCpitch(i)).*sin(fCyaw(i))-sin(fCroll(i)).*cos(fCyaw(i));
                -sin(fCpitch(i)),sin(fCroll(i)).*cos(fCpitch(i)),cos(fCroll(i)).*cos(fCpitch(i))];
         Cnb = CNN'*Cnb;
-        V_m(1,i) = V_m(1,i) - X_kf(4,1);
-        V_m(2,i) = V_m(2,i) - X_kf(5,1);
-        V_m(3,i) = V_m(3,i) - X_kf(6,1);
-        mimu_Lat(i) = mimu_Lat(i) - X_kf(7,1);
-        mimu_Lon(i) = mimu_Lon(i) - X_kf(8,1);
-        mimu_H(i) = mimu_H(i) - X_kf(9,1);
+        V_m(1,i-fh+1) = V_m(1,i-fh+1) - X_kf(4,1);
+        V_m(2,i-fh+1) = V_m(2,i-fh+1) - X_kf(5,1);
+        V_m(3,i-fh+1) = V_m(3,i-fh+1) - X_kf(6,1);
+        mimu_Lat(i-fh+1) = mimu_Lat(i-fh+1) - X_kf(7,1);
+        mimu_Lon(i-fh+1) = mimu_Lon(i-fh+1) - X_kf(8,1);
+        mimu_H(i-fh+1) = mimu_H(i-fh+1) - X_kf(9,1);
         X_kf(1:9) = 0;
         i_kf = i;
     end
@@ -392,7 +512,8 @@ for i = 2:hang1
     end
 end
 
-x_time = 0:1614;
+[~,lie] = size(Xkf_attitude);
+x_time = 0:(lie-1);
 figure
 plot(x_time,Xkf_gyroscope(1,:).*(180/pi),'-m')
 hold on
@@ -428,7 +549,7 @@ ylabel('Angle(deg)');
 grid on;
 legend('EKF','truth')
 
-for i = 1:hang1
+for i = 1:hang1-fh+1
     % coordinate_IMU
     Rx = (re/sqrt(1-e11^2.*(sin(mimu_Lat(i)))^2));
     Ry = ((Rx.*(1-e11^2))/(1-e11^2.*(sin(mimu_Lat(i)))^2));
@@ -495,14 +616,14 @@ ylabel('Y/m');
 legend('IMU trajectory','True trajectory','GNSS trajectory');
 grid on
 hold off
-for i = 1:325838
+for i = 1:325838-fh+1
     VX1(i,1) = sqrt(V_m(1,i)^2 + V_m(2,i)^2 + V_m(3,i)^2);
 end
 for i = 1:325017
     VX2(i,1) = sqrt(truth_vx(i)^2 + truth_vy(i)^2 + truth_vz(i)^2);
 end
 figure
-plot(Ti_mimu,VX1,'-r')
+plot(Ti_mimu(fh:end),VX1,'-r')
 hold on
 plot(Ti_truth,VX2,'-k')
 grid on
