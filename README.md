@@ -6,5 +6,5 @@ The file integrated_navigation.m is a GNSS/INS integrated navigation framework w
 The proposing the alignment algorithm（OBA, initial alignment algorithm） are "Velocity/Position Integration Formula Part I: Application to In-Flight Coarse Alignment" and "Velocity/Position Integration Formula Part II: Application to Strapdown Inertial Navigation Computation."  
 The file P.m is a framework for integrated navigation using only GNSS positioning (without initial alignment).  
 The file Alignment.m contains an in-motion initial alignment algorithm for integrated navigation that I proposed.  
-https://kns.cnki.net/kcms2/article/abstract?v=gisQO9UvOsZgkjGM73sYt9sN-WXA-rNXbfb276Tz4o9I-S4fvaevBwD9lXvBytq-DbNlOi-ognB62VWUIdGKEmpFRt5tDVuLgN36KEdfYavdXxjNUf3InCIC_NgpqFtfVnv4e6QzCnDmTW_ot7ZMylROpzjEjjUxrpi_1RFP6FpNVXtV5KbPnyQmHQg89Q-xRDIKA032g5Y=&uniplatform=NZKPT&language=CHS
+https://kns.cnki.net/kcms2/article/abstract?v=gisQO9UvOsZgkjGM73sYt9sN-WXA-rNXbfb276Tz4o9I-S4fvaevBwD9lXvBytq-DbNlOi-ognB62VWUIdGKEmpFRt5tDVuLgN36KEdfYavdXxjNUf3InCIC_NgpqFtfVnv4e6QzCnDmTW_ot7ZMylROpzjEjjUxrpi_1RFP6FpNVXtV5KbPnyQmHQg89Q-xRDIKA032g5Y=&uniplatform=NZKPT&language=CHS  
 My knowledge is limited; this is for reference only.
